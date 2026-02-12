@@ -1,0 +1,9 @@
+{
+  "name": "lims-automation",
+  "version": "1.0.0",
+  "dependencies": {
+    "firebase-admin": "^11.11.0",
+    "@sendgrid/mail": "^7.7.0",
+    "@netlify/functions": "^2.0.0"
+  }
+}

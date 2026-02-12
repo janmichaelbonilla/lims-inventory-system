@@ -1,0 +1,11 @@
+[build]
+  command = "npm install"
+  publish = "public"
+
+[functions]
+  node_bundler = "esbuild"
+
+# Runs every day at 8:00 AM
+[[scheduled_functions]]
+  name = "daily_check"
+  cron = "0 8 * * *"

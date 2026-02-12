@@ -1,0 +1,541 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>Clinical Inventory (v38 - Silent)</title>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
+    <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
+
+    <style>
+        :root { --primary-color: #008080; --bg-color: #f2f2f7; --card-bg: #ffffff; --warn-color: #ff9800; --error-color: #d32f2f; }
+        body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 0; background-color: var(--bg-color); color: #333; -webkit-tap-highlight-color: transparent; }
+        
+        .container { 
+            width: 95%; max-width: 1000px; margin: 20px auto; 
+            background: var(--card-bg); padding: 25px; border-radius: 16px; 
+            box-shadow: 0 4px 20px rgba(0,0,0,0.08); display: flex; flex-direction: column; height: 92vh; 
+        }
+        
+        header { border-bottom: 3px solid var(--primary-color); padding-bottom: 10px; margin-bottom: 15px; display: flex; justify-content: space-between; align-items: center; }
+        h1 { color: var(--primary-color); margin: 0; font-size: 1.8rem; }
+        
+        /* INPUTS */
+        .input-group { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; background: #e0f2f1; padding: 15px; border-radius: 12px; border: 1px solid #b2dfdb; }
+        .form-item { display: flex; flex-direction: column; }
+        label { font-weight: 700; font-size: 0.9rem; margin-bottom: 5px; color: #004d40; }
+        input { padding: 12px; border: 2px solid #ccc; border-radius: 8px; font-size: 1rem; background: white; outline: none; }
+        input:focus { border-color: var(--primary-color); }
+        
+        #scanInput { border: 3px solid var(--primary-color); font-weight: bold; letter-spacing: 1px; color: #004d40; }
+        #scanInput.error-flash { animation: shake 0.4s; border-color: var(--error-color); background-color: #ffebee; }
+        @keyframes shake { 0% { transform: translateX(0); } 25% { transform: translateX(-5px); } 50% { transform: translateX(5px); } 75% { transform: translateX(-5px); } 100% { transform: translateX(0); } }
+
+        .rapid-active { background-color: #d4edda !important; border-color: #28a745 !important; }
+
+        .scan-row { display: flex; gap: 10px; }
+        .manual-add-btn { background-color: var(--primary-color); color: white; border: none; padding: 0 20px; border-radius: 10px; font-size: 1.5rem; cursor: pointer; }
+
+        /* SWITCH */
+        .toggle-container { display: flex; align-items: center; gap: 10px; }
+        .switch { position: relative; display: inline-block; width: 50px; height: 28px; }
+        .switch input { opacity: 0; width: 0; height: 0; }
+        .slider { position: absolute; cursor: pointer; top: 0; left: 0; right: 0; bottom: 0; background-color: #ccc; transition: .4s; border-radius: 34px; }
+        .slider:before { position: absolute; content: ""; height: 20px; width: 20px; left: 4px; bottom: 4px; background-color: white; transition: .4s; border-radius: 50%; }
+        input:checked + .slider { background-color: #28a745; }
+        input:checked + .slider:before { transform: translateX(24px); }
+
+        /* STATS */
+        .stats-bar { display: flex; gap: 15px; margin: 15px 0; }
+        .stat-card { flex: 1; background: #fff; border: 1px solid #ddd; padding: 15px; border-radius: 10px; text-align: center; box-shadow: 0 2px 5px rgba(0,0,0,0.05); }
+        .stat-number { font-size: 1.8rem; font-weight: 800; color: var(--primary-color); display: block; }
+        
+        #cardExpiry { cursor: pointer; transition: transform 0.2s; border-left: 5px solid #ccc; }
+        #cardExpiry:active { transform: scale(0.98); }
+        .exp-safe { border-left-color: #28a745 !important; }
+        .exp-warn { border-left-color: #ff9800 !important; background-color: #fff3e0 !important; }
+        .exp-danger { border-left-color: #d32f2f !important; background-color: #ffebee !important; }
+
+        /* LIST */
+        .inventory-list { flex: 1; overflow-y: auto; padding-right: 5px; -webkit-overflow-scrolling: touch; }
+        .study-group { border: 1px solid #ddd; border-radius: 10px; margin-bottom: 15px; overflow: hidden; box-shadow: 0 2px 5px rgba(0,0,0,0.05); background: white; }
+        
+        .group-header { background-color: #e0f7fa; padding: 12px 15px; cursor: pointer; display: flex; justify-content: space-between; align-items: center; border-bottom: 1px solid #b2dfdb; user-select: none; }
+        .group-title { font-weight: bold; font-size: 1.1rem; color: #00695c; display: flex; align-items: center; gap: 10px; }
+        .group-count { background: #008080; color: white; padding: 2px 8px; border-radius: 12px; font-size: 0.8rem; }
+        
+        .group-body { display: block; }
+        .study-group.collapsed .group-body { display: none; }
+        .collapse-icon { display: inline-block; transition: transform 0.2s; }
+        .study-group.collapsed .collapse-icon { transform: rotate(-90deg); }
+        
+        .email-btn { background-color: var(--warn-color); color: white; border: none; padding: 5px 12px; border-radius: 20px; font-size: 0.85rem; cursor: pointer; display: none; font-weight: bold; animation: pulse 2s infinite; }
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.8; } 100% { opacity: 1; } }
+
+        table { width: 100%; border-collapse: collapse; }
+        th { background: #f8f9fa; color: #666; padding: 10px; text-align: left; font-size: 0.85rem; border-bottom: 2px solid #eee; }
+        td { padding: 10px; border-bottom: 1px solid #eee; font-size: 0.95rem; vertical-align: middle; }
+        
+        .status-avail { color: #155724; background: #d4edda; padding: 4px 8px; border-radius: 12px; font-size: 0.8em; font-weight: bold; }
+        .status-used { color: #721c24; background: #f8d7da; padding: 4px 8px; border-radius: 12px; font-size: 0.8em; font-weight: bold; }
+        .row-expired td { background-color: #ffebee; }
+        .row-warning td { background-color: #fff3e0; }
+        .expired-tag { color: #d32f2f; font-weight: bold; display: block; font-size: 0.8em; }
+        .warning-tag { color: #e65100; font-weight: bold; display: block; font-size: 0.8em; }
+
+        .delete-btn { background: none; border: none; color: #dc3545; font-size: 1.1rem; cursor: pointer; padding: 5px; }
+
+        footer { margin-top: 15px; display: flex; justify-content: space-between; align-items: center; }
+        .reset-btn { background-color: #dc3545; color: white; border: none; padding: 12px 20px; border-radius: 8px; font-weight: bold; cursor: pointer; }
+        .settings-btn { background-color: #607d8b; color: white; border: none; padding: 8px 16px; border-radius: 8px; font-weight: bold; cursor: pointer; }
+
+        /* TOAST */
+        #toast { visibility: hidden; min-width: 250px; background-color: #28a745; color: #fff; text-align: center; border-radius: 50px; padding: 16px; position: fixed; z-index: 2000; bottom: 30px; left: 50%; transform: translateX(-50%); box-shadow: 0 4px 10px rgba(0,0,0,0.3); font-weight: bold; }
+        #toast.show { visibility: visible; -webkit-animation: fadein 0.3s, fadeout 0.3s 2.0s; animation: fadein 0.3s, fadeout 0.3s 2.0s; }
+
+        /* MODALS */
+        .modal-overlay { position: fixed; top: 0; left: 0; width: 100%; height: 100%; background: rgba(0,0,0,0.6); display: none; justify-content: center; align-items: center; z-index: 1000; }
+        .modal-content { background: white; padding: 30px; border-radius: 16px; width: 450px; text-align: center; box-shadow: 0 10px 40px rgba(0,0,0,0.3); }
+        
+        .dup-header { color: #d32f2f; font-size: 1.4rem; margin-bottom: 10px; display: flex; align-items: center; justify-content: center; gap: 10px; }
+        .dup-details { background: #ffebee; padding: 15px; border-radius: 8px; text-align: left; margin: 15px 0; border: 1px solid #ffcdd2; font-size: 0.95rem; }
+        .dup-details strong { color: #d32f2f; display: inline-block; width: 80px; }
+        .dup-actions { display: flex; gap: 10px; justify-content: center; margin-top: 20px; }
+        .btn-cancel { background: #666; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; flex: 1; }
+        .btn-force { background: #d32f2f; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: bold; }
+
+        #adminScanInput { font-size: 1.5rem; text-align: center; letter-spacing: 2px; width: 100%; box-sizing: border-box; }
+
+        @media screen and (max-width: 768px) {
+            .input-group { grid-template-columns: 1fr; gap: 10px; }
+            .form-item { grid-column: span 1 !important; }
+            .form-item:last-child { order: -1; margin-bottom: 10px; } 
+        }
+    </style>
+</head>
+<body onload="initInventory()">
+
+    <div class="container">
+        <header>
+            <h1>🏥 Clinical Inventory</h1>
+            <button class="settings-btn" onclick="openSettings()">⚙️ Settings</button>
+        </header>
+
+        <div class="input-group">
+            <div class="form-item"><label>1. Study Name</label><input type="text" id="kitStudy" placeholder="e.g. ONCO-X"></div>
+            <div class="form-item"><label>2. Visit Name</label><input type="text" id="kitVisit" placeholder="e.g. Screening"></div>
+            <div class="form-item"><label>3. Destination</label><input type="text" id="kitDest" placeholder="e.g. Central Lab"></div>
+            <div class="form-item"><label>4. Expiration</label><input type="date" id="kitExpiry"></div>
+            
+            <div class="form-item" style="grid-column: span 4;">
+                <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
+                    <label style="margin:0; font-size:1rem; color:#008080;">🔦 Scan Barcode (Tap Here)</label>
+                    <div class="toggle-container">
+                        <label class="switch"><input type="checkbox" id="rapidModeToggle" checked><span class="slider"></span></label>
+                        <span style="color:#28a745; font-weight:bold; font-size:0.9rem;">Scanner Mode</span>
+                    </div>
+                </div>
+                <div class="scan-row">
+                    <input type="text" id="scanInput" placeholder="Tap to Scan..." oninput="handleDebouncedInput(this)" autocomplete="off" style="flex:1;">
+                    <button class="manual-add-btn" onclick="manualAdd()">➕</button>
+                </div>
+            </div>
+        </div>
+
+        <div class="stats-bar">
+            <div class="stat-card"><span class="stat-number" id="countAvail">0</span>Available Kits</div>
+            <div class="stat-card exp-safe" id="cardExpiry" onclick="filterExpiring()">
+                <span class="stat-number" id="countExpiry">0</span>Expiring Soon
+            </div>
+        </div>
+
+        <div id="inventoryContainer" class="inventory-list">
+            <div style="text-align:center; padding:30px; color:#888;">Waiting for data...</div>
+        </div>
+
+        <footer>
+            <div style="font-size:0.8em; color:#999;">v38 (Silent)</div>
+            <button class="reset-btn" onclick="requestReset()">🗑️ Reset Inventory</button>
+        </footer>
+    </div>
+
+    <div id="toast">Item Added</div>
+
+    <div id="dupModal" class="modal-overlay">
+        <div class="modal-content">
+            <h2 class="dup-header">⚠️ Duplicate Scanned!</h2>
+            <p>This barcode is already in the inventory.</p>
+            <div class="dup-details">
+                <div><strong>Barcode:</strong> <span id="dupBarcode">--</span></div>
+                <div><strong>Study:</strong> <span id="dupStudy">--</span></div>
+            </div>
+            <div class="dup-actions">
+                <button class="btn-cancel" onclick="closeDupModal()">❌ Cancel</button>
+                <button class="btn-force" onclick="forceAddDuplicate()">Add Anyway ➕</button>
+            </div>
+        </div>
+    </div>
+
+    <div id="settingsModal" class="modal-overlay">
+        <div class="modal-content">
+            <h2>⚙️ Study Contacts</h2>
+            <p>Assign email recipients for expiration alerts.</p>
+            <div style="text-align:left; background:#f5f5f5; padding:15px; border-radius:8px;">
+                <div class="form-item">
+                    <label>Study Name</label>
+                    <input type="text" id="settingStudyName" placeholder="e.g. ONCO-X">
+                </div>
+                <div class="form-item" style="margin-top:10px;">
+                    <label>Contact Email</label>
+                    <input type="email" id="settingEmail" placeholder="nurse@hospital.com">
+                </div>
+                <button onclick="saveContact()" style="width:100%; margin-top:15px; background:var(--primary-color); color:white; border:none; padding:10px; border-radius:6px; cursor:pointer;">Save Contact</button>
+            </div>
+            <div id="contactsList" style="text-align:left; margin-top:15px; max-height:150px; overflow-y:auto; font-size:0.9rem;"></div>
+            <button onclick="closeSettings()" style="margin-top:15px; padding:8px 20px; border:none; background:#ccc; border-radius:6px; cursor:pointer;">Close</button>
+        </div>
+    </div>
+
+    <div id="authModal" class="modal-overlay">
+        <div class="modal-content">
+            <h2 style="color:#dc3545; margin-top:0;">Security Check</h2>
+            <p>Scan Admin Badge to reset.</p>
+            <input type="password" id="adminScanInput" placeholder="Scan Badge..." oninput="handleAdminScan(this)" autocomplete="off">
+            <div id="authStatusText" style="margin:15px 0; font-weight:bold; color:#666;">Waiting...</div>
+            <button onclick="closeAuthModal()" style="margin-top:20px; padding:10px 20px; background:#ccc; border:none; border-radius:6px;">Cancel</button>
+        </div>
+    </div>
+
+    <script>
+        const firebaseConfig = { apiKey: "AIzaSyDE_aWewzn_vLL_d0OSDWwtilX7N6GBiHY", authDomain: "lwenclabdispatchlog.firebaseapp.com", databaseURL: "https://lwenclabdispatchlog-default-rtdb.europe-west1.firebasedatabase.app", projectId: "lwenclabdispatchlog", storageBucket: "lwenclabdispatchlog.firebasestorage.app", messagingSenderId: "710466719490", appId: "1:710466719490:web:7332bdbf9f7625bf8a7c1b" };
+        if (!firebase.apps.length) { firebase.initializeApp(firebaseConfig); }
+        const db = firebase.database();
+
+        const DB_PATH = "inventory_live_v1";
+        const CONTACTS_PATH = "study_contacts";
+        
+        let scanTimer; 
+        let studyCounts = {};
+        let studyContacts = {};
+        let activeBarcodes = new Set();
+        let pendingDupBarcode = ""; 
+        let totalExpiring = 0;
+        let isFiltered = false;
+
+        function initInventory() { 
+            document.getElementById('scanInput').focus(); 
+            loadContacts();
+            startStreamListener(); 
+        }
+
+        function showToast(msg) {
+            const x = document.getElementById("toast");
+            x.innerText = msg; x.className = "show";
+            setTimeout(function(){ x.className = x.className.replace("show", ""); }, 1500);
+        }
+
+        // --- FILTER LOGIC ---
+        function filterExpiring() {
+            if(totalExpiring === 0 && !isFiltered) return;
+            isFiltered = !isFiltered;
+            const container = document.getElementById('inventoryContainer');
+            const card = document.getElementById('cardExpiry');
+            
+            if(isFiltered) {
+                container.querySelectorAll('.study-group').forEach(group => {
+                    const issues = group.querySelectorAll('.row-expired, .row-warning');
+                    if(issues.length === 0) { group.style.display = 'none'; } 
+                    else {
+                        group.classList.remove('collapsed');
+                        group.querySelectorAll('tr').forEach(row => {
+                            if(!row.classList.contains('row-expired') && !row.classList.contains('row-warning')) { row.style.display = 'none'; }
+                        });
+                    }
+                });
+                card.style.border = "2px solid blue";
+            } else {
+                container.querySelectorAll('.study-group').forEach(group => {
+                    group.style.display = 'block';
+                    group.classList.add('collapsed');
+                    group.querySelectorAll('tr').forEach(row => row.style.display = '');
+                });
+                card.style.border = "none";
+            }
+        }
+
+        function updateGlobalExpiryCount() {
+            const rows = document.querySelectorAll('.row-expired, .row-warning');
+            totalExpiring = rows.length;
+            const card = document.getElementById('cardExpiry');
+            document.getElementById('countExpiry').innerText = totalExpiring;
+            
+            card.className = "stat-card"; 
+            if(totalExpiring > 0) {
+                const hasExpired = document.querySelector('.row-expired');
+                card.classList.add(hasExpired ? 'exp-danger' : 'exp-warn');
+            } else {
+                card.classList.add('exp-safe');
+            }
+        }
+
+        // --- CONTACTS ---
+        function loadContacts() {
+            db.ref(CONTACTS_PATH).on('value', snap => {
+                studyContacts = snap.val() || {};
+                renderContactsList();
+            });
+        }
+        function openSettings() { document.getElementById('settingsModal').style.display = 'flex'; }
+        function closeSettings() { document.getElementById('settingsModal').style.display = 'none'; }
+        function saveContact() {
+            const s = document.getElementById('settingStudyName').value.trim();
+            const e = document.getElementById('settingEmail').value.trim();
+            if(!s || !e) return alert("Fill both fields");
+            const safeKey = s.replace(/[.#$/[\]]/g, "-");
+            db.ref(CONTACTS_PATH + "/" + safeKey).set({ name: s, email: e });
+            document.getElementById('settingStudyName').value = "";
+            document.getElementById('settingEmail').value = "";
+            alert("Saved!");
+        }
+        function renderContactsList() {
+            const list = document.getElementById('contactsList');
+            list.innerHTML = "<strong>Saved Contacts:</strong><br>";
+            Object.values(studyContacts).forEach(c => {
+                list.innerHTML += `<div style="padding:5px; border-bottom:1px solid #eee;">${c.name}: ${c.email}</div>`;
+            });
+        }
+
+        function sendExpiryEmail(studyName) {
+            let email = "";
+            Object.values(studyContacts).forEach(c => { if(c.name.toLowerCase() === studyName.toLowerCase()) email = c.email; });
+            if(!email) return alert("No contact email found for " + studyName);
+
+            let body = "The following kits in " + studyName + " are expiring soon or expired:\n\n";
+            let count = 0;
+            const rows = document.querySelectorAll(`[id^='row-']`);
+            rows.forEach(row => {
+                if(row.closest('.study-group').id.includes(studyName.replace(/[^a-zA-Z0-9]/g, '-'))) {
+                    if(row.classList.contains('row-expired') || row.classList.contains('row-warning')) {
+                        const cells = row.getElementsByTagName('td');
+                        body += `Barcode: ${cells[0].innerText} | Visit: ${cells[1].innerText} | Expiry: ${cells[2].innerText}\n`;
+                        count++;
+                    }
+                }
+            });
+            if(count === 0) return alert("No expiring items found.");
+            window.location.href = `mailto:${email}?subject=${encodeURIComponent("Expiring Kits: " + studyName)}&body=${encodeURIComponent(body)}`;
+        }
+
+        // --- SCANNER ---
+        function handleDebouncedInput(input) {
+            clearTimeout(scanTimer);
+            scanTimer = setTimeout(() => {
+                let rawVal = input.value;
+                let cleanCode = rawVal.replace(/[^a-zA-Z0-9]/g, "").trim();
+                if (cleanCode.length > 2) { input.value = ""; checkAndAddKit(cleanCode); }
+            }, 200);
+        }
+
+        function manualAdd() {
+            const input = document.getElementById('scanInput');
+            let cleanCode = input.value.replace(/[^a-zA-Z0-9]/g, "").trim();
+            if(cleanCode.length > 0) { input.value=""; checkAndAddKit(cleanCode); } 
+            else { alert("Scan or type barcode."); }
+        }
+
+        function checkAndAddKit(barcode) {
+            const study = document.getElementById('kitStudy').value.trim();
+            const visit = document.getElementById('kitVisit').value.trim();
+            if(!study || !visit) { alert("Enter Study & Visit first!"); return; }
+
+            if (activeBarcodes.has(barcode)) { triggerError(barcode, "Local"); return; }
+
+            db.ref(DB_PATH).orderByChild('barcode').equalTo(barcode).once('value', snapshot => {
+                if (snapshot.exists()) {
+                    const data = Object.values(snapshot.val())[0]; 
+                    triggerError(barcode, data.study);
+                } else { pushToDB(barcode); }
+            });
+        }
+
+        function triggerError(barcode, study) {
+            document.getElementById('dupBarcode').innerText = barcode;
+            document.getElementById('dupStudy').innerText = study;
+            pendingDupBarcode = barcode;
+            document.getElementById('dupModal').style.display = 'flex';
+        }
+
+        function closeDupModal() { document.getElementById('dupModal').style.display = 'none'; document.getElementById('scanInput').focus(); }
+        function forceAddDuplicate() { if(pendingDupBarcode) { pushToDB(pendingDupBarcode); closeDupModal(); } }
+
+        function pushToDB(barcode) {
+            const study = document.getElementById('kitStudy').value.trim();
+            const visit = document.getElementById('kitVisit').value.trim();
+            const dest = document.getElementById('kitDest').value.trim();
+            const expiry = document.getElementById('kitExpiry').value;
+
+            activeBarcodes.add(barcode);
+            const newRef = db.ref(DB_PATH).push();
+            newRef.set({
+                barcode: barcode, study: study, visit: visit, destination: dest, expiry: expiry,
+                status: 'Available', addedDate: new Date().toLocaleDateString(), timestamp: Date.now()
+            }, (err) => {
+                if(!err) {
+                    sessionScans++;
+                    document.getElementById('sessionCount').innerText = sessionScans;
+                    showToast(`✅ Saved: ${barcode}`);
+                }
+            });
+            document.getElementById('scanInput').focus();
+        }
+
+        window.deleteKit = function(key, barcode) { 
+            if(confirm("Delete item?")) {
+                if(barcode) activeBarcodes.delete(barcode.toString());
+                db.ref(DB_PATH + '/' + key).remove();
+            }
+        };
+
+        function requestReset() { document.getElementById('authModal').style.display = 'flex'; document.getElementById('adminScanInput').value = ""; setTimeout(() => document.getElementById('adminScanInput').focus(), 100); }
+        function closeAuthModal() { document.getElementById('authModal').style.display = 'none'; }
+        
+        function handleAdminScan(input) {
+            clearTimeout(scanTimer);
+            scanTimer = setTimeout(() => {
+                let code = input.value.replace(/[^a-zA-Z0-9]/g, "").trim(); 
+                if(code.length > 3) {
+                    if(confirm("WARNING: Wipe ALL inventory?")) {
+                        db.ref(DB_PATH).remove(); 
+                        document.getElementById('inventoryContainer').innerHTML = ""; 
+                        document.getElementById('countAvail').innerText = "0";
+                        document.getElementById('countExpiry').innerText = "0";
+                        studyCounts = {}; activeBarcodes.clear();
+                        closeAuthModal();
+                    } else { input.value = ""; }
+                }
+            }, 300);
+        }
+
+        // --- RENDER ---
+        function startStreamListener() {
+            db.ref(DB_PATH).off();
+            const container = document.getElementById('inventoryContainer');
+            container.innerHTML = "";
+            studyCounts = {}; activeBarcodes.clear();
+
+            db.ref(DB_PATH).limitToLast(500).on('child_added', (snapshot) => {
+                const kit = snapshot.val();
+                const key = snapshot.key;
+                if(kit.barcode) activeBarcodes.add(kit.barcode.toString());
+                renderItem(key, kit);
+                if(kit.status === 'Available') {
+                    let el = document.getElementById('countAvail');
+                    el.innerText = (parseInt(el.innerText) || 0) + 1;
+                }
+            });
+
+            db.ref(DB_PATH).on('child_removed', (snapshot) => {
+                const kit = snapshot.val();
+                const key = snapshot.key;
+                if(kit.barcode) activeBarcodes.delete(kit.barcode.toString());
+                const row = document.getElementById('row-' + key);
+                
+                if(row) {
+                    const groupDiv = row.closest('.study-group');
+                    const studyName = groupDiv.id.replace('group-', '');
+                    row.remove();
+                    if(studyCounts[studyName]) studyCounts[studyName]--;
+                    updateHeaderCount(studyName);
+                    checkGroupExpiry(studyName);
+                    updateGlobalExpiryCount(); 
+                    if(studyCounts[studyName] <= 0) groupDiv.remove();
+                    if(kit.status === 'Available') {
+                        let el = document.getElementById('countAvail');
+                        el.innerText = Math.max(0, (parseInt(el.innerText) || 0) - 1);
+                    }
+                }
+            });
+        }
+
+        function renderItem(key, kit) {
+            const container = document.getElementById('inventoryContainer');
+            const studyName = kit.study || "Unknown";
+            const safeStudyId = "group-" + studyName.replace(/[^a-zA-Z0-9]/g, '-');
+            
+            let groupDiv = document.getElementById(safeStudyId);
+            if(!groupDiv) {
+                groupDiv = document.createElement('div');
+                groupDiv.className = 'study-group collapsed';
+                groupDiv.id = safeStudyId;
+                groupDiv.innerHTML = `
+                    <div class="group-header" onclick="toggleGroup('${safeStudyId}')">
+                        <div class="group-title">
+                            <span class="collapse-icon">▼</span> ${studyName} 
+                            <span id="count-${safeStudyId}" class="group-count">0</span>
+                        </div>
+                        <button id="email-${safeStudyId}" class="email-btn" onclick="event.stopPropagation(); sendExpiryEmail('${studyName}')">✉️ Notify</button>
+                    </div>
+                    <div class="group-body"><table><thead><tr><th>Barcode</th><th>Visit</th><th>Expiry</th><th>Dest</th><th>Status</th><th></th></tr></thead><tbody id="tbody-${safeStudyId}"></tbody></table></div>`;
+                container.prepend(groupDiv);
+                studyCounts[studyName] = 0;
+            }
+
+            const tbody = document.getElementById(`tbody-${safeStudyId}`);
+            let badge = kit.status === 'Available' ? `<span class="status-avail">In Stock</span>` : `<span class="status-used">Processed</span>`;
+            
+            let expiryDisplay = kit.expiry || "-";
+            let rowClass = "";
+            if(kit.expiry) {
+                const today = new Date();
+                const expDate = new Date(kit.expiry);
+                const diffTime = expDate - today;
+                const diffDays = Math.ceil(diffTime / (1000 * 60 * 60 * 24));
+
+                if(diffDays < 0) {
+                    expiryDisplay = `<span class="expired-tag">Expired (${kit.expiry})</span>`;
+                    rowClass = "row-expired";
+                } else if(diffDays <= 30) {
+                    expiryDisplay = `<span class="warning-tag">${kit.expiry} (Exp Soon)</span>`;
+                    rowClass = "row-warning";
+                }
+            }
+
+            const rowHTML = `
+                <tr id="row-${key}" class="${rowClass}">
+                    <td style="font-weight:bold; font-family:monospace;">${kit.barcode}</td>
+                    <td>${kit.visit}</td>
+                    <td>${expiryDisplay}</td>
+                    <td>${kit.destination}</td>
+                    <td>${badge}</td>
+                    <td><button class="delete-btn" onclick="deleteKit('${key}', '${kit.barcode}')">🗑️</button></td>
+                </tr>`;
+            tbody.insertAdjacentHTML('afterbegin', rowHTML);
+            studyCounts[studyName]++;
+            updateHeaderCount(studyName);
+            
+            if(rowClass !== "") {
+                const btn = document.getElementById(`email-${safeStudyId}`);
+                if(btn) btn.style.display = "block";
+                updateGlobalExpiryCount(); 
+            }
+        }
+
+        function checkGroupExpiry(studyName) {
+            const safeStudyId = "group-" + studyName.replace(/[^a-zA-Z0-9]/g, '-');
+            const tbody = document.getElementById(`tbody-${safeStudyId}`);
+            if(!tbody) return;
+            const hasIssues = tbody.querySelector('.row-expired, .row-warning');
+            const btn = document.getElementById(`email-${safeStudyId}`);
+            if(btn) btn.style.display = hasIssues ? "block" : "none";
+        }
+
+        function updateHeaderCount(studyName) {
+            const safeStudyId = "group-" + studyName.replace(/[^a-zA-Z0-9]/g, '-');
+            const countSpan = document.getElementById(`count-${safeStudyId}`);
+            if(countSpan) countSpan.innerText = studyCounts[studyName] + " Items";
+        }
+
+        function toggleGroup(id) { document.getElementById(id).classList.toggle('collapsed'); }
+    </script>
+</body>
+</html>
