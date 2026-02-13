@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Clinical Inventory (v38 - Silent)</title>
+    <title>Clinical Inventory (v41 - Smart Autocomplete)</title>
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
 
@@ -77,7 +77,6 @@
         td { padding: 10px; border-bottom: 1px solid #eee; font-size: 0.95rem; vertical-align: middle; }
         
         .status-avail { color: #155724; background: #d4edda; padding: 4px 8px; border-radius: 12px; font-size: 0.8em; font-weight: bold; }
-        .status-used { color: #721c24; background: #f8d7da; padding: 4px 8px; border-radius: 12px; font-size: 0.8em; font-weight: bold; }
         .row-expired td { background-color: #ffebee; }
         .row-warning td { background-color: #fff3e0; }
         .expired-tag { color: #d32f2f; font-weight: bold; display: block; font-size: 0.8em; }
@@ -122,10 +121,27 @@
         </header>
 
         <div class="input-group">
-            <div class="form-item"><label>1. Study Name</label><input type="text" id="kitStudy" placeholder="e.g. ONCO-X"></div>
-            <div class="form-item"><label>2. Visit Name</label><input type="text" id="kitVisit" placeholder="e.g. Screening"></div>
-            <div class="form-item"><label>3. Destination</label><input type="text" id="kitDest" placeholder="e.g. Central Lab"></div>
-            <div class="form-item"><label>4. Expiration</label><input type="date" id="kitExpiry"></div>
+            <div class="form-item">
+                <label>1. Study Name</label>
+                <input type="text" id="kitStudy" list="studyOptions" placeholder="e.g. ONCO-X" autocomplete="off">
+                <datalist id="studyOptions"></datalist>
+            </div>
+            
+            <div class="form-item">
+                <label>2. Visit Name</label>
+                <input type="text" id="kitVisit" list="visitOptions" placeholder="e.g. Screening" autocomplete="off">
+                <datalist id="visitOptions"></datalist>
+            </div>
+            
+            <div class="form-item">
+                <label>3. Destination</label>
+                <input type="text" id="kitDest" placeholder="e.g. Central Lab">
+            </div>
+            
+            <div class="form-item">
+                <label>4. Expiration</label>
+                <input type="date" id="kitExpiry">
+            </div>
             
             <div class="form-item" style="grid-column: span 4;">
                 <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:8px;">
@@ -154,7 +170,7 @@
         </div>
 
         <footer>
-            <div style="font-size:0.8em; color:#999;">v38 (Silent)</div>
+            <div style="font-size:0.8em; color:#999;">v41 (Smart Autocomplete)</div>
             <button class="reset-btn" onclick="requestReset()">🗑️ Reset Inventory</button>
         </footer>
     </div>
@@ -221,11 +237,40 @@
         let pendingDupBarcode = ""; 
         let totalExpiring = 0;
         let isFiltered = false;
+        let sessionScans = 0;
+
+        // --- AUTOCOMPLETE HISTORY ---
+        let savedStudies = JSON.parse(localStorage.getItem('lims_saved_studies')) || [];
+        let savedVisits = JSON.parse(localStorage.getItem('lims_saved_visits')) || [];
 
         function initInventory() { 
             document.getElementById('scanInput').focus(); 
+            updateDatalists(); // Load memory into the dropdowns
             loadContacts();
             startStreamListener(); 
+        }
+
+        function updateDatalists() {
+            const sList = document.getElementById('studyOptions');
+            const vList = document.getElementById('visitOptions');
+            sList.innerHTML = savedStudies.map(s => `<option value="${s}">`).join('');
+            vList.innerHTML = savedVisits.map(v => `<option value="${v}">`).join('');
+        }
+
+        function saveToHistory(study, visit) {
+            let changed = false;
+            // Prevent duplicate saves and empty saves
+            if (study && !savedStudies.includes(study)) { savedStudies.push(study); changed = true; }
+            if (visit && !savedVisits.includes(visit)) { savedVisits.push(visit); changed = true; }
+            
+            if (changed) {
+                // Keep history sorted alphabetically
+                savedStudies.sort();
+                savedVisits.sort();
+                localStorage.setItem('lims_saved_studies', JSON.stringify(savedStudies));
+                localStorage.setItem('lims_saved_visits', JSON.stringify(savedVisits));
+                updateDatalists();
+            }
         }
 
         function showToast(msg) {
@@ -374,6 +419,9 @@
             const dest = document.getElementById('kitDest').value.trim();
             const expiry = document.getElementById('kitExpiry').value;
 
+            // Log it into the autocomplete history
+            saveToHistory(study, visit);
+
             activeBarcodes.add(barcode);
             const newRef = db.ref(DB_PATH).push();
             newRef.set({
@@ -382,7 +430,6 @@
             }, (err) => {
                 if(!err) {
                     sessionScans++;
-                    document.getElementById('sessionCount').innerText = sessionScans;
                     showToast(`✅ Saved: ${barcode}`);
                 }
             });
@@ -416,7 +463,7 @@
             }, 300);
         }
 
-        // --- RENDER ---
+        // --- RENDER & LISTENERS ---
         function startStreamListener() {
             db.ref(DB_PATH).off();
             const container = document.getElementById('inventoryContainer');
@@ -426,35 +473,58 @@
             db.ref(DB_PATH).limitToLast(500).on('child_added', (snapshot) => {
                 const kit = snapshot.val();
                 const key = snapshot.key;
+                
+                if(kit.status !== 'Available') return; 
+
                 if(kit.barcode) activeBarcodes.add(kit.barcode.toString());
                 renderItem(key, kit);
-                if(kit.status === 'Available') {
-                    let el = document.getElementById('countAvail');
-                    el.innerText = (parseInt(el.innerText) || 0) + 1;
+                
+                let el = document.getElementById('countAvail');
+                el.innerText = (parseInt(el.innerText) || 0) + 1;
+            });
+
+            db.ref(DB_PATH).on('child_changed', (snapshot) => {
+                const kit = snapshot.val();
+                const key = snapshot.key;
+                
+                if(kit.status !== 'Available') {
+                    removeRowFromUI(key, kit.barcode, kit.study);
                 }
             });
 
             db.ref(DB_PATH).on('child_removed', (snapshot) => {
                 const kit = snapshot.val();
                 const key = snapshot.key;
-                if(kit.barcode) activeBarcodes.delete(kit.barcode.toString());
-                const row = document.getElementById('row-' + key);
-                
-                if(row) {
-                    const groupDiv = row.closest('.study-group');
-                    const studyName = groupDiv.id.replace('group-', '');
-                    row.remove();
-                    if(studyCounts[studyName]) studyCounts[studyName]--;
-                    updateHeaderCount(studyName);
-                    checkGroupExpiry(studyName);
-                    updateGlobalExpiryCount(); 
-                    if(studyCounts[studyName] <= 0) groupDiv.remove();
-                    if(kit.status === 'Available') {
-                        let el = document.getElementById('countAvail');
-                        el.innerText = Math.max(0, (parseInt(el.innerText) || 0) - 1);
-                    }
+                if(kit.status === 'Available') {
+                    removeRowFromUI(key, kit.barcode, kit.study);
                 }
             });
+        }
+
+        function removeRowFromUI(key, barcode, originalStudyName) {
+            if(barcode) activeBarcodes.delete(barcode.toString());
+            const row = document.getElementById('row-' + key);
+            
+            if(row) {
+                const tbody = row.closest('tbody');
+                const groupDiv = row.closest('.study-group');
+                const studyName = originalStudyName || "Unknown";
+                row.remove();
+                
+                if(studyCounts[studyName]) studyCounts[studyName]--;
+                updateHeaderCount(studyName);
+                checkGroupExpiry(studyName);
+                updateGlobalExpiryCount(); 
+                
+                if(studyCounts[studyName] <= 0) {
+                    groupDiv.remove();
+                } else if(tbody) {
+                    sortStudyTable(tbody); 
+                }
+                
+                let el = document.getElementById('countAvail');
+                el.innerText = Math.max(0, (parseInt(el.innerText) || 0) - 1);
+            }
         }
 
         function renderItem(key, kit) {
@@ -481,10 +551,12 @@
             }
 
             const tbody = document.getElementById(`tbody-${safeStudyId}`);
-            let badge = kit.status === 'Available' ? `<span class="status-avail">In Stock</span>` : `<span class="status-used">Processed</span>`;
+            let badge = `<span class="status-avail">In Stock</span>`; 
             
             let expiryDisplay = kit.expiry || "-";
             let rowClass = "";
+            let rawExpiry = kit.expiry || "9999-12-31"; 
+
             if(kit.expiry) {
                 const today = new Date();
                 const expDate = new Date(kit.expiry);
@@ -500,8 +572,10 @@
                 }
             }
 
+            const safeVisitStr = (kit.visit || '').replace(/"/g, '&quot;').toLowerCase();
+
             const rowHTML = `
-                <tr id="row-${key}" class="${rowClass}">
+                <tr id="row-${key}" class="${rowClass}" data-visit="${safeVisitStr}" data-expiry="${rawExpiry}">
                     <td style="font-weight:bold; font-family:monospace;">${kit.barcode}</td>
                     <td>${kit.visit}</td>
                     <td>${expiryDisplay}</td>
@@ -509,15 +583,49 @@
                     <td>${badge}</td>
                     <td><button class="delete-btn" onclick="deleteKit('${key}', '${kit.barcode}')">🗑️</button></td>
                 </tr>`;
+            
             tbody.insertAdjacentHTML('afterbegin', rowHTML);
             studyCounts[studyName]++;
             updateHeaderCount(studyName);
+            
+            sortStudyTable(tbody);
             
             if(rowClass !== "") {
                 const btn = document.getElementById(`email-${safeStudyId}`);
                 if(btn) btn.style.display = "block";
                 updateGlobalExpiryCount(); 
             }
+        }
+
+        function sortStudyTable(tbody) {
+            if(!tbody) return;
+            let rows = Array.from(tbody.querySelectorAll('tr'));
+            
+            rows.sort((a, b) => {
+                let vA = a.getAttribute('data-visit');
+                let vB = b.getAttribute('data-visit');
+                if (vA < vB) return -1;
+                if (vA > vB) return 1;
+                
+                let eA = a.getAttribute('data-expiry');
+                let eB = b.getAttribute('data-expiry');
+                if (eA < eB) return -1;
+                if (eA > eB) return 1;
+                
+                return 0;
+            });
+            
+            let lastVisit = null;
+            rows.forEach(row => {
+                let currentVisit = row.getAttribute('data-visit');
+                if (lastVisit !== null && currentVisit !== lastVisit) {
+                    row.style.borderTop = "2px solid #b2dfdb"; 
+                } else {
+                    row.style.borderTop = "";
+                }
+                lastVisit = currentVisit;
+                tbody.appendChild(row);
+            });
         }
 
         function checkGroupExpiry(studyName) {
