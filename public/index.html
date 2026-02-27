@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Clinical Inventory (v41 - Smart Autocomplete)</title>
+    <title>Clinical Inventory (v42 - Print Reports)</title>
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
 
@@ -24,8 +24,8 @@
         .input-group { display: grid; grid-template-columns: repeat(4, 1fr); gap: 12px; background: #e0f2f1; padding: 15px; border-radius: 12px; border: 1px solid #b2dfdb; }
         .form-item { display: flex; flex-direction: column; }
         label { font-weight: 700; font-size: 0.9rem; margin-bottom: 5px; color: #004d40; }
-        input { padding: 12px; border: 2px solid #ccc; border-radius: 8px; font-size: 1rem; background: white; outline: none; }
-        input:focus { border-color: var(--primary-color); }
+        input, select { padding: 12px; border: 2px solid #ccc; border-radius: 8px; font-size: 1rem; background: white; outline: none; }
+        input:focus, select:focus { border-color: var(--primary-color); }
         
         #scanInput { border: 3px solid var(--primary-color); font-weight: bold; letter-spacing: 1px; color: #004d40; }
         #scanInput.error-flash { animation: shake 0.4s; border-color: var(--error-color); background-color: #ffebee; }
@@ -87,6 +87,7 @@
         footer { margin-top: 15px; display: flex; justify-content: space-between; align-items: center; }
         .reset-btn { background-color: #dc3545; color: white; border: none; padding: 12px 20px; border-radius: 8px; font-weight: bold; cursor: pointer; }
         .settings-btn { background-color: #607d8b; color: white; border: none; padding: 8px 16px; border-radius: 8px; font-weight: bold; cursor: pointer; }
+        .print-btn { background-color: #17a2b8; color: white; border: none; padding: 8px 16px; border-radius: 8px; font-weight: bold; cursor: pointer; margin-right: 10px; }
 
         /* TOAST */
         #toast { visibility: hidden; min-width: 250px; background-color: #28a745; color: #fff; text-align: center; border-radius: 50px; padding: 16px; position: fixed; z-index: 2000; bottom: 30px; left: 50%; transform: translateX(-50%); box-shadow: 0 4px 10px rgba(0,0,0,0.3); font-weight: bold; }
@@ -100,10 +101,27 @@
         .dup-details { background: #ffebee; padding: 15px; border-radius: 8px; text-align: left; margin: 15px 0; border: 1px solid #ffcdd2; font-size: 0.95rem; }
         .dup-details strong { color: #d32f2f; display: inline-block; width: 80px; }
         .dup-actions { display: flex; gap: 10px; justify-content: center; margin-top: 20px; }
-        .btn-cancel { background: #666; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; flex: 1; }
+        .btn-cancel { background: #666; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; flex: 1; font-weight: bold; }
         .btn-force { background: #d32f2f; color: white; border: none; padding: 10px 20px; border-radius: 6px; cursor: pointer; font-weight: bold; }
 
         #adminScanInput { font-size: 1.5rem; text-align: center; letter-spacing: 2px; width: 100%; box-sizing: border-box; }
+
+        /* PRINT STYLES */
+        @media print {
+            body * { visibility: hidden; }
+            #print-area, #print-area * { visibility: visible; }
+            #print-area { position: absolute; left: 0; top: 0; width: 100%; padding: 20px; }
+            .print-table { width: 100%; border-collapse: collapse; margin-top: 20px; font-family: sans-serif; font-size: 10pt; }
+            .print-table th, .print-table td { border: 1px solid #000; padding: 8px; text-align: left; }
+            .print-table th { background-color: #eee !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+            .print-header { text-align: center; margin-bottom: 20px; border-bottom: 2px solid #000; padding-bottom: 10px; }
+            
+            /* Highlighting colors enforced for printing */
+            .print-warn { background-color: #fff3cd !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+            .print-danger { background-color: #ffebee !important; color: #d32f2f !important; font-weight: bold; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+        }
+        #print-area { display: none; }
+        @media print { #print-area { display: block; } .container { display: none; } }
 
         @media screen and (max-width: 768px) {
             .input-group { grid-template-columns: 1fr; gap: 10px; }
@@ -117,7 +135,10 @@
     <div class="container">
         <header>
             <h1>🏥 Clinical Inventory</h1>
-            <button class="settings-btn" onclick="openSettings()">⚙️ Settings</button>
+            <div>
+                <button class="print-btn" onclick="openPrintModal()">🖨️ Print Report</button>
+                <button class="settings-btn" onclick="openSettings()">⚙️ Settings</button>
+            </div>
         </header>
 
         <div class="input-group">
@@ -170,12 +191,33 @@
         </div>
 
         <footer>
-            <div style="font-size:0.8em; color:#999;">v41 (Smart Autocomplete)</div>
+            <div style="font-size:0.8em; color:#999;">v42 (Print Reports)</div>
             <button class="reset-btn" onclick="requestReset()">🗑️ Reset Inventory</button>
         </footer>
     </div>
 
+    <div id="print-area"></div>
+
     <div id="toast">Item Added</div>
+
+    <div id="printModal" class="modal-overlay">
+        <div class="modal-content">
+            <h2 style="color: #008080; margin-top: 0;">🖨️ Print Inventory Report</h2>
+            <p>Select a specific study to print, or print the entire available inventory.</p>
+            
+            <div class="form-item" style="text-align: left; margin: 20px 0;">
+                <label>Select Study to Print:</label>
+                <select id="printStudySelect" style="width:100%; border: 2px solid #008080; background: #e0f2f1;">
+                    <option value="ALL">-- Print All Studies --</option>
+                </select>
+            </div>
+            
+            <div class="dup-actions">
+                <button class="btn-cancel" onclick="closePrintModal()">Cancel</button>
+                <button class="btn-force" style="background:#008080;" onclick="generatePrint()">Generate Report</button>
+            </div>
+        </div>
+    </div>
 
     <div id="dupModal" class="modal-overlay">
         <div class="modal-content">
@@ -239,16 +281,112 @@
         let isFiltered = false;
         let sessionScans = 0;
 
-        // --- AUTOCOMPLETE HISTORY ---
         let savedStudies = JSON.parse(localStorage.getItem('lims_saved_studies')) || [];
         let savedVisits = JSON.parse(localStorage.getItem('lims_saved_visits')) || [];
 
         function initInventory() { 
             document.getElementById('scanInput').focus(); 
-            updateDatalists(); // Load memory into the dropdowns
+            updateDatalists();
             loadContacts();
             startStreamListener(); 
         }
+
+        // --- PRINT REPORT FEATURE ---
+        function openPrintModal() {
+            const select = document.getElementById('printStudySelect');
+            select.innerHTML = '<option value="ALL">-- Print All Studies --</option>';
+            
+            // Populate dropdown with currently tracked active studies
+            Object.keys(studyCounts).sort().forEach(study => {
+                if (studyCounts[study] > 0) {
+                    select.innerHTML += `<option value="${study}">${study}</option>`;
+                }
+            });
+            
+            document.getElementById('printModal').style.display = 'flex';
+        }
+        
+        function closePrintModal() { document.getElementById('printModal').style.display = 'none'; }
+
+        function generatePrint() {
+            const selectedStudy = document.getElementById('printStudySelect').value;
+            
+            // Fetch live data directly from Firebase to ensure 100% accuracy for the print report
+            db.ref(DB_PATH).once('value', snapshot => {
+                let items = [];
+                snapshot.forEach(child => {
+                    let kit = child.val();
+                    if(kit.status === 'Available') {
+                        if(selectedStudy === 'ALL' || kit.study === selectedStudy) {
+                            items.push(kit);
+                        }
+                    }
+                });
+                
+                // Sort by Expiration Date (Oldest/Expired first)
+                items.sort((a, b) => {
+                    if (!a.expiry) return 1; // Puts items with no expiry at the bottom
+                    if (!b.expiry) return -1;
+                    return new Date(a.expiry) - new Date(b.expiry);
+                });
+                
+                let html = `<div class="print-header">
+                                <h1 style="margin:5px 0;">LIMS Inventory Report</h1>
+                                <h3 style="margin:0 0 10px 0; color:#555;">Study: ${selectedStudy === 'ALL' ? 'All Active Studies' : selectedStudy}</h3>
+                                <p style="margin:0;">Date Generated: ${new Date().toLocaleDateString()}</p>
+                            </div>`;
+                            
+                html += `<table class="print-table">
+                            <thead>
+                                <tr>
+                                    <th>Study</th>
+                                    <th>Visit</th>
+                                    <th>Barcode</th>
+                                    <th>Destination</th>
+                                    <th>Expiration Date</th>
+                                </tr>
+                            </thead>
+                            <tbody>`;
+                
+                const today = new Date();
+                
+                items.forEach(kit => {
+                    let rowClass = "";
+                    let expiryDisplay = kit.expiry || "N/A";
+                    
+                    if(kit.expiry) {
+                        let expDate = new Date(kit.expiry);
+                        let diffDays = Math.ceil((expDate - today) / (1000*60*60*24));
+                        
+                        // Highlight logic (<= 60 days)
+                        if(diffDays < 0) { 
+                            rowClass = "print-danger"; 
+                            expiryDisplay = `<strong>${kit.expiry} (EXPIRED)</strong>`; 
+                        } else if(diffDays <= 60) { 
+                            rowClass = "print-warn"; 
+                            expiryDisplay = `<strong>${kit.expiry} (Expiring Soon)</strong>`; 
+                        }
+                    }
+                    
+                    html += `<tr class="${rowClass}">
+                                <td>${kit.study || '-'}</td>
+                                <td>${kit.visit || '-'}</td>
+                                <td style="font-family:monospace; font-weight:bold;">${kit.barcode || '-'}</td>
+                                <td>${kit.destination || '-'}</td>
+                                <td>${expiryDisplay}</td>
+                             </tr>`;
+                });
+                
+                html += `</tbody></table>`;
+                
+                document.getElementById('print-area').innerHTML = html;
+                closePrintModal();
+                
+                // Slight delay to allow the DOM to render the table before opening the print dialog
+                setTimeout(() => window.print(), 500);
+            });
+        }
+        // ------------------------------
 
         function updateDatalists() {
             const sList = document.getElementById('studyOptions');
@@ -259,12 +397,9 @@
 
         function saveToHistory(study, visit) {
             let changed = false;
-            // Prevent duplicate saves and empty saves
             if (study && !savedStudies.includes(study)) { savedStudies.push(study); changed = true; }
             if (visit && !savedVisits.includes(visit)) { savedVisits.push(visit); changed = true; }
-            
             if (changed) {
-                // Keep history sorted alphabetically
                 savedStudies.sort();
                 savedVisits.sort();
                 localStorage.setItem('lims_saved_studies', JSON.stringify(savedStudies));
@@ -323,7 +458,6 @@
             }
         }
 
-        // --- CONTACTS ---
         function loadContacts() {
             db.ref(CONTACTS_PATH).on('value', snap => {
                 studyContacts = snap.val() || {};
@@ -371,7 +505,6 @@
             window.location.href = `mailto:${email}?subject=${encodeURIComponent("Expiring Kits: " + studyName)}&body=${encodeURIComponent(body)}`;
         }
 
-        // --- SCANNER ---
         function handleDebouncedInput(input) {
             clearTimeout(scanTimer);
             scanTimer = setTimeout(() => {
@@ -419,7 +552,6 @@
             const dest = document.getElementById('kitDest').value.trim();
             const expiry = document.getElementById('kitExpiry').value;
 
-            // Log it into the autocomplete history
             saveToHistory(study, visit);
 
             activeBarcodes.add(barcode);
