@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Clinical Inventory (v43 - Smart Scans)</title>
+    <title>Clinical Inventory (v42 - Print Reports)</title>
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
 
@@ -68,6 +68,9 @@
         .study-group.collapsed .group-body { display: none; }
         .collapse-icon { display: inline-block; transition: transform 0.2s; }
         .study-group.collapsed .collapse-icon { transform: rotate(-90deg); }
+        
+        .email-btn { background-color: var(--warn-color); color: white; border: none; padding: 5px 12px; border-radius: 20px; font-size: 0.85rem; cursor: pointer; display: none; font-weight: bold; animation: pulse 2s infinite; }
+        @keyframes pulse { 0% { opacity: 1; } 50% { opacity: 0.8; } 100% { opacity: 1; } }
 
         table { width: 100%; border-collapse: collapse; }
         th { background: #f8f9fa; color: #666; padding: 10px; text-align: left; font-size: 0.85rem; border-bottom: 2px solid #eee; }
@@ -83,6 +86,7 @@
 
         footer { margin-top: 15px; display: flex; justify-content: space-between; align-items: center; }
         .reset-btn { background-color: #dc3545; color: white; border: none; padding: 12px 20px; border-radius: 8px; font-weight: bold; cursor: pointer; }
+        .settings-btn { background-color: #607d8b; color: white; border: none; padding: 8px 16px; border-radius: 8px; font-weight: bold; cursor: pointer; }
         .print-btn { background-color: #17a2b8; color: white; border: none; padding: 8px 16px; border-radius: 8px; font-weight: bold; cursor: pointer; margin-right: 10px; }
 
         /* TOAST */
@@ -112,6 +116,7 @@
             .print-table th { background-color: #eee !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
             .print-header { text-align: center; margin-bottom: 20px; border-bottom: 2px solid #000; padding-bottom: 10px; }
             
+            /* Highlighting colors enforced for printing */
             .print-warn { background-color: #fff3cd !important; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
             .print-danger { background-color: #ffebee !important; color: #d32f2f !important; font-weight: bold; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
         }
@@ -132,6 +137,7 @@
             <h1>🏥 Clinical Inventory</h1>
             <div>
                 <button class="print-btn" onclick="openPrintModal()">🖨️ Print Report</button>
+                <button class="settings-btn" onclick="openSettings()">⚙️ Settings</button>
             </div>
         </header>
 
@@ -185,7 +191,7 @@
         </div>
 
         <footer>
-            <div style="font-size:0.8em; color:#999;">v43 (Smart Scans)</div>
+            <div style="font-size:0.8em; color:#999;">v42 (Print Reports)</div>
             <button class="reset-btn" onclick="requestReset()">🗑️ Reset Inventory</button>
         </footer>
     </div>
@@ -228,6 +234,28 @@
         </div>
     </div>
 
+    <div id="settingsModal" class="modal-overlay">
+        <div class="modal-content">
+            <h2>⚙️ Study Contacts</h2>
+            <p>Assign email recipients for expiration alerts.</p>
+            <div style="text-align:left; background:#f5f5f5; padding:15px; border-radius:8px;">
+                <div class="form-item">
+                    <label>Study Name</label>
+                    <select id="settingStudyName" style="padding: 12px; border: 2px solid #ccc; border-radius: 8px; font-size: 1rem; width: 100%; outline: none;">
+                        <option value="">-- Select a Study --</option>
+                    </select>
+                </div>
+                <div class="form-item" style="margin-top:10px;">
+                    <label>Contact Email</label>
+                    <input type="email" id="settingEmail" placeholder="nurse@hospital.com">
+                </div>
+                <button onclick="saveContact()" style="width:100%; margin-top:15px; background:var(--primary-color); color:white; border:none; padding:10px; border-radius:6px; cursor:pointer;">Save Contact</button>
+            </div>
+            <div id="contactsList" style="text-align:left; margin-top:15px; max-height:150px; overflow-y:auto; font-size:0.9rem;"></div>
+            <button onclick="closeSettings()" style="margin-top:15px; padding:8px 20px; border:none; background:#ccc; border-radius:6px; cursor:pointer;">Close</button>
+        </div>
+    </div>
+
     <div id="authModal" class="modal-overlay">
         <div class="modal-content">
             <h2 style="color:#dc3545; margin-top:0;">Security Check</h2>
@@ -244,9 +272,11 @@
         const db = firebase.database();
 
         const DB_PATH = "inventory_live_v1";
+        const CONTACTS_PATH = "study_contacts";
         
         let scanTimer; 
         let studyCounts = {};
+        let studyContacts = {};
         let activeBarcodes = new Set();
         let pendingDupBarcode = ""; 
         let totalExpiring = 0;
@@ -259,79 +289,22 @@
         function initInventory() { 
             document.getElementById('scanInput').focus(); 
             updateDatalists();
+            loadContacts();
             startStreamListener(); 
         }
-
-        // --- SMART BARCODE PARSER ---
-        function parseSmartBarcode(barcode) {
-            // Looks for GS1 standard: 01 (14 digits GTIN) followed by 17 (6 digits Expiry YYMMDD)
-            const gs1Regex = /01(\d{14})17(\d{6})/;
-            const match = barcode.match(gs1Regex);
-            
-            if (match) {
-                const expStr = match[2]; // YYMMDD
-                
-                // Convert YYMMDD to YYYY-MM-DD for the HTML date input
-                // Assuming "20" as century prefix for clinical kits expiring this century
-                const year = "20" + expStr.substring(0, 2);
-                const month = expStr.substring(2, 4);
-                const day = expStr.substring(4, 6);
-                const formattedDate = `${year}-${month}-${day}`;
-                
-                return { isSmart: true, expiry: formattedDate, raw: barcode };
-            }
-            return { isSmart: false, raw: barcode };
-        }
-
-        function processScan(rawBarcode) {
-            const parsedData = parseSmartBarcode(rawBarcode);
-            
-            if (parsedData.isSmart) {
-                // Auto-fill the expiration date field!
-                document.getElementById('kitExpiry').value = parsedData.expiry;
-                showToast(`🧠 Smart GS1 Found! Expiry: ${parsedData.expiry}`);
-            }
-            
-            // Wait slightly so the user sees the auto-fill happen, then proceed to save
-            setTimeout(() => {
-                checkAndAddKit(rawBarcode);
-            }, 100);
-        }
-
-        function handleDebouncedInput(input) {
-            clearTimeout(scanTimer);
-            scanTimer = setTimeout(() => {
-                let rawVal = input.value.trim();
-                // Remove spaces but DO NOT aggressively strip standard GS1 characters yet
-                let cleanCode = rawVal.replace(/\s+/g, ""); 
-                if (cleanCode.length > 2) { 
-                    input.value = ""; 
-                    processScan(cleanCode); 
-                }
-            }, 200);
-        }
-
-        function manualAdd() {
-            const input = document.getElementById('scanInput');
-            let cleanCode = input.value.trim().replace(/\s+/g, "");
-            if(cleanCode.length > 0) { 
-                input.value=""; 
-                processScan(cleanCode); 
-            } else { 
-                alert("Scan or type barcode."); 
-            }
-        }
-        // ------------------------------
 
         // --- PRINT REPORT FEATURE ---
         function openPrintModal() {
             const select = document.getElementById('printStudySelect');
             select.innerHTML = '<option value="ALL">-- Print All Studies --</option>';
+            
+            // Populate dropdown with currently tracked active studies
             Object.keys(studyCounts).sort().forEach(study => {
                 if (studyCounts[study] > 0) {
                     select.innerHTML += `<option value="${study}">${study}</option>`;
                 }
             });
+            
             document.getElementById('printModal').style.display = 'flex';
         }
         
@@ -339,6 +312,8 @@
 
         function generatePrint() {
             const selectedStudy = document.getElementById('printStudySelect').value;
+            
+            // Fetch live data directly from Firebase to ensure 100% accuracy for the print report
             db.ref(DB_PATH).once('value', snapshot => {
                 let items = [];
                 snapshot.forEach(child => {
@@ -350,8 +325,9 @@
                     }
                 });
                 
+                // Sort by Expiration Date (Oldest/Expired first)
                 items.sort((a, b) => {
-                    if (!a.expiry) return 1; 
+                    if (!a.expiry) return 1; // Puts items with no expiry at the bottom
                     if (!b.expiry) return -1;
                     return new Date(a.expiry) - new Date(b.expiry);
                 });
@@ -379,9 +355,12 @@
                 items.forEach(kit => {
                     let rowClass = "";
                     let expiryDisplay = kit.expiry || "N/A";
+                    
                     if(kit.expiry) {
                         let expDate = new Date(kit.expiry);
                         let diffDays = Math.ceil((expDate - today) / (1000*60*60*24));
+                        
+                        // Highlight logic (<= 60 days)
                         if(diffDays < 0) { 
                             rowClass = "print-danger"; 
                             expiryDisplay = `<strong>${kit.expiry} (EXPIRED)</strong>`; 
@@ -390,6 +369,7 @@
                             expiryDisplay = `<strong>${kit.expiry} (Expiring Soon)</strong>`; 
                         }
                     }
+                    
                     html += `<tr class="${rowClass}">
                                 <td>${kit.study || '-'}</td>
                                 <td>${kit.visit || '-'}</td>
@@ -398,10 +378,13 @@
                                 <td>${expiryDisplay}</td>
                              </tr>`;
                 });
+                
                 html += `</tbody></table>`;
                 
                 document.getElementById('print-area').innerHTML = html;
                 closePrintModal();
+                
+                // Slight delay to allow the DOM to render the table before opening the print dialog
                 setTimeout(() => window.print(), 500);
             });
         }
@@ -430,9 +413,10 @@
         function showToast(msg) {
             const x = document.getElementById("toast");
             x.innerText = msg; x.className = "show";
-            setTimeout(function(){ x.className = x.className.replace("show", ""); }, 3000); // Extended slightly so they can read the smart parse info
+            setTimeout(function(){ x.className = x.className.replace("show", ""); }, 1500);
         }
 
+        // --- FILTER LOGIC ---
         function filterExpiring() {
             if(totalExpiring === 0 && !isFiltered) return;
             isFiltered = !isFiltered;
@@ -476,6 +460,110 @@
             }
         }
 
+        function loadContacts() {
+            db.ref(CONTACTS_PATH).on('value', snap => {
+                studyContacts = snap.val() || {};
+                renderContactsList();
+            });
+        }
+        
+        function openSettings() { 
+            const studySelect = document.getElementById('settingStudyName');
+            
+            // Clear previous options and set the default placeholder
+            studySelect.innerHTML = '<option value="">-- Select a Study --</option>';
+            
+            // Combine locally saved studies with the live active studies tracked by Firebase
+            let allStudies = new Set([...savedStudies, ...Object.keys(studyCounts)]);
+            
+            // Filter out empty or missing names and sort them alphabetically
+            let sortedStudies = Array.from(allStudies).filter(s => s && s.trim() !== "" && s !== "Unknown").sort();
+            
+            // Populate the dropdown
+            if (sortedStudies.length > 0) {
+                sortedStudies.forEach(study => {
+                    studySelect.innerHTML += `<option value="${study}">${study}</option>`;
+                });
+            } else {
+                studySelect.innerHTML += `<option value="" disabled>No studies available. Add a kit first.</option>`;
+            }
+
+            document.getElementById('settingsModal').style.display = 'flex'; 
+        }
+
+        function closeSettings() { document.getElementById('settingsModal').style.display = 'none'; }
+        
+        function saveContact() {
+            const s = document.getElementById('settingStudyName').value.trim();
+            const e = document.getElementById('settingEmail').value.trim();
+            if(!s || !e) return alert("Fill both fields. Select a study and enter an email.");
+            const safeKey = s.replace(/[.#$/[\]]/g, "-");
+            db.ref(CONTACTS_PATH + "/" + safeKey).set({ name: s, email: e });
+            document.getElementById('settingStudyName').value = "";
+            document.getElementById('settingEmail').value = "";
+            alert("Contact Saved!");
+        }
+
+        function renderContactsList() {
+            const list = document.getElementById('contactsList');
+            list.innerHTML = "<strong>Saved Contacts:</strong><br>";
+            
+            // Loop through Firebase keys to render each contact with a delete button
+            Object.keys(studyContacts).forEach(key => {
+                const c = studyContacts[key];
+                list.innerHTML += `
+                    <div style="padding: 5px; border-bottom: 1px solid #eee; display: flex; justify-content: space-between; align-items: center;">
+                        <span>${c.name}: ${c.email}</span>
+                        <button onclick="deleteContact('${key}')" style="background:none; border:none; color:#dc3545; font-size:1.1rem; cursor:pointer;" title="Delete Contact">🗑️</button>
+                    </div>`;
+            });
+        }
+
+        function deleteContact(key) {
+            if(confirm("Are you sure you want to delete this contact?")) {
+                db.ref(CONTACTS_PATH + "/" + key).remove()
+                    .then(() => alert("Contact removed."))
+                    .catch(err => alert("Error deleting contact: " + err.message));
+            }
+        }
+
+        function sendExpiryEmail(studyName) {
+            let email = "";
+            Object.values(studyContacts).forEach(c => { if(c.name.toLowerCase() === studyName.toLowerCase()) email = c.email; });
+            if(!email) return alert("No contact email found for " + studyName);
+
+            let body = "The following kits in " + studyName + " are expiring soon or expired:\n\n";
+            let count = 0;
+            const rows = document.querySelectorAll(`[id^='row-']`);
+            rows.forEach(row => {
+                if(row.closest('.study-group').id.includes(studyName.replace(/[^a-zA-Z0-9]/g, '-'))) {
+                    if(row.classList.contains('row-expired') || row.classList.contains('row-warning')) {
+                        const cells = row.getElementsByTagName('td');
+                        body += `Barcode: ${cells[0].innerText} | Visit: ${cells[1].innerText} | Expiry: ${cells[2].innerText}\n`;
+                        count++;
+                    }
+                }
+            });
+            if(count === 0) return alert("No expiring items found.");
+            window.location.href = `mailto:${email}?subject=${encodeURIComponent("Expiring Kits: " + studyName)}&body=${encodeURIComponent(body)}`;
+        }
+
+        function handleDebouncedInput(input) {
+            clearTimeout(scanTimer);
+            scanTimer = setTimeout(() => {
+                let rawVal = input.value;
+                let cleanCode = rawVal.replace(/[^a-zA-Z0-9]/g, "").trim();
+                if (cleanCode.length > 2) { input.value = ""; checkAndAddKit(cleanCode); }
+            }, 200);
+        }
+
+        function manualAdd() {
+            const input = document.getElementById('scanInput');
+            let cleanCode = input.value.replace(/[^a-zA-Z0-9]/g, "").trim();
+            if(cleanCode.length > 0) { input.value=""; checkAndAddKit(cleanCode); } 
+            else { alert("Scan or type barcode."); }
+        }
+
         function checkAndAddKit(barcode) {
             const study = document.getElementById('kitStudy').value.trim();
             const visit = document.getElementById('kitVisit').value.trim();
@@ -517,9 +605,7 @@
             }, (err) => {
                 if(!err) {
                     sessionScans++;
-                    if(!document.getElementById('toast').className.includes("show")) {
-                         showToast(`✅ Saved: ${barcode}`);
-                    }
+                    showToast(`✅ Saved: ${barcode}`);
                 }
             });
             document.getElementById('scanInput').focus();
@@ -552,6 +638,7 @@
             }, 300);
         }
 
+        // --- RENDER & LISTENERS ---
         function startStreamListener() {
             db.ref(DB_PATH).off();
             const container = document.getElementById('inventoryContainer');
@@ -574,13 +661,18 @@
             db.ref(DB_PATH).on('child_changed', (snapshot) => {
                 const kit = snapshot.val();
                 const key = snapshot.key;
-                if(kit.status !== 'Available') { removeRowFromUI(key, kit.barcode, kit.study); }
+                
+                if(kit.status !== 'Available') {
+                    removeRowFromUI(key, kit.barcode, kit.study);
+                }
             });
 
             db.ref(DB_PATH).on('child_removed', (snapshot) => {
                 const kit = snapshot.val();
                 const key = snapshot.key;
-                if(kit.status === 'Available') { removeRowFromUI(key, kit.barcode, kit.study); }
+                if(kit.status === 'Available') {
+                    removeRowFromUI(key, kit.barcode, kit.study);
+                }
             });
         }
 
@@ -596,6 +688,7 @@
                 
                 if(studyCounts[studyName]) studyCounts[studyName]--;
                 updateHeaderCount(studyName);
+                checkGroupExpiry(studyName);
                 updateGlobalExpiryCount(); 
                 
                 if(studyCounts[studyName] <= 0) {
@@ -625,6 +718,7 @@
                             <span class="collapse-icon">▼</span> ${studyName} 
                             <span id="count-${safeStudyId}" class="group-count">0</span>
                         </div>
+                        <button id="email-${safeStudyId}" class="email-btn" onclick="event.stopPropagation(); sendExpiryEmail('${studyName}')">✉️ Notify</button>
                     </div>
                     <div class="group-body"><table><thead><tr><th>Barcode</th><th>Visit</th><th>Expiry</th><th>Dest</th><th>Status</th><th></th></tr></thead><tbody id="tbody-${safeStudyId}"></tbody></table></div>`;
                 container.prepend(groupDiv);
@@ -672,6 +766,8 @@
             sortStudyTable(tbody);
             
             if(rowClass !== "") {
+                const btn = document.getElementById(`email-${safeStudyId}`);
+                if(btn) btn.style.display = "block";
                 updateGlobalExpiryCount(); 
             }
         }
@@ -705,6 +801,15 @@
                 lastVisit = currentVisit;
                 tbody.appendChild(row);
             });
+        }
+
+        function checkGroupExpiry(studyName) {
+            const safeStudyId = "group-" + studyName.replace(/[^a-zA-Z0-9]/g, '-');
+            const tbody = document.getElementById(`tbody-${safeStudyId}`);
+            if(!tbody) return;
+            const hasIssues = tbody.querySelector('.row-expired, .row-warning');
+            const btn = document.getElementById(`email-${safeStudyId}`);
+            if(btn) btn.style.display = hasIssues ? "block" : "none";
         }
 
         function updateHeaderCount(studyName) {
