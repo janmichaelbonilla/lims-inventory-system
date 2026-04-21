@@ -3,7 +3,12 @@
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
-    <title>Clinical Inventory (v42 - Print Reports)</title>
+    <title>Clinical Inventory (v42 - PWA)</title>
+    
+    <link rel="manifest" href="manifest.json">
+    <meta name="theme-color" content="#008080">
+    <link rel="apple-touch-icon" href="icon-192.png">
+
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-app.js"></script>
     <script src="https://www.gstatic.com/firebasejs/8.10.1/firebase-database.js"></script>
 
@@ -191,7 +196,7 @@
         </div>
 
         <footer>
-            <div style="font-size:0.8em; color:#999;">v42 (Print Reports)</div>
+            <div style="font-size:0.8em; color:#999;">v42 (PWA Enabled)</div>
             <button class="reset-btn" onclick="requestReset()">🗑️ Reset Inventory</button>
         </footer>
     </div>
@@ -819,6 +824,18 @@
         }
 
         function toggleGroup(id) { document.getElementById(id).classList.toggle('collapsed'); }
+
+        // PWA Service Worker Registration
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('./sw.js')
+                    .then(registration => {
+                        console.log('ServiceWorker registered successfully with scope: ', registration.scope);
+                    }, err => {
+                        console.log('ServiceWorker registration failed: ', err);
+                    });
+            });
+        }
     </script>
 </body>
 </html>
