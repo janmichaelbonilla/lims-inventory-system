@@ -1,0 +1,21 @@
+{
+  "name": "Clinical Inventory",
+  "short_name": "Inventory",
+  "description": "Clinical Inventory Tracking System",
+  "start_url": "./index.html",
+  "display": "standalone",
+  "background_color": "#f2f2f7",
+  "theme_color": "#008080",
+  "icons": [
+    {
+      "src": "https://placehold.co/192x192/008080/FFFFFF/png?text=Inv",
+      "sizes": "192x192",
+      "type": "image/png"
+    },
+    {
+      "src": "https://placehold.co/512x512/008080/FFFFFF/png?text=Inv",
+      "sizes": "512x512",
+      "type": "image/png"
+    }
+  ]
+}
